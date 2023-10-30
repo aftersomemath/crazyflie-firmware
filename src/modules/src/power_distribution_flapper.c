@@ -64,6 +64,7 @@ static float thrust;
 static uint16_t act_max = 65535;
 
 static float pitch_ampl = 0.4f; // 1 = full servo stroke
+static float yaw_ampl = 0.3f; // 1 = full servo stroke
 
 #if CONFIG_POWER_DISTRIBUTION_FLAPPER_REVB
   uint32_t idPitch = 1;
@@ -170,12 +171,12 @@ void powerDistribution(const control_t *control, motors_thrust_uncapped_t* motor
 
   #if CONFIG_POWER_DISTRIBUTION_FLAPPER_REVB
     motorThrustUncapped->motors.m2 = flapperConfig.pitchServoNeutral*act_max / 100.0f + pitch_ampl * control->pitch; // pitch servo
-    motorThrustUncapped->motors.m3 = flapperConfig.yawServoNeutral*act_max / 100.0f - control->yaw; // yaw servo
+    motorThrustUncapped->motors.m3 = flapperConfig.yawServoNeutral*act_max / 100.0f - yaw_ampl * control->yaw; // yaw servo
     motorThrustUncapped->motors.m1 =  0.5f * control->roll + thrust * (1.0f + flapperConfig.rollBias / 100.0f); // left motor
     motorThrustUncapped->motors.m4 = -0.5f * control->roll + thrust * (1.0f - flapperConfig.rollBias / 100.0f); // right motor
   #else
     motorThrustUncapped->motors.m1 = flapperConfig.pitchServoNeutral * act_max / 100.0f + pitch_ampl * control->pitch; // pitch servo
-    motorThrustUncapped->motors.m3 = flapperConfig.yawServoNeutral*act_max / 100.0f - control->yaw; // yaw servo
+    motorThrustUncapped->motors.m3 = flapperConfig.yawServoNeutral*act_max / 100.0f - yaw_ampl * control->yaw; // yaw servo
     motorThrustUncapped->motors.m2 =  0.5f * control->roll + thrust * (1.0f + flapperConfig.rollBias / 100.0f); // left motor
     motorThrustUncapped->motors.m4 = -0.5f * control->roll + thrust * (1.0f - flapperConfig.rollBias / 100.0f); // right motor
   #endif

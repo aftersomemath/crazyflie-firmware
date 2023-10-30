@@ -55,11 +55,11 @@
 #define PID_PITCH_RATE_KFF 0.0
 #define PID_PITCH_RATE_INTEGRATION_LIMIT   33.3
 
-#define PID_YAW_RATE_KP  80.0
+#define PID_YAW_RATE_KP  40.0
 #define PID_YAW_RATE_KI  0.0
 #define PID_YAW_RATE_KD  0.0
-#define PID_YAW_RATE_KFF 220.0
-#define PID_YAW_RATE_INTEGRATION_LIMIT     166.7
+#define PID_YAW_RATE_KFF 110.0
+#define PID_YAW_RATE_INTEGRATION_LIMIT     88.35
 
 #define PID_ROLL_KP  10.0
 #define PID_ROLL_KI  0.0
@@ -73,11 +73,11 @@
 #define PID_PITCH_KFF 0.0
 #define PID_PITCH_INTEGRATION_LIMIT   20.0
 
-#define PID_YAW_KP  30.0
+#define PID_YAW_KP  15.0
 #define PID_YAW_KI  0.0
-#define PID_YAW_KD  1.0
+#define PID_YAW_KD  0.5
 #define PID_YAW_KFF 0.0
-#define PID_YAW_INTEGRATION_LIMIT     360.0
+#define PID_YAW_INTEGRATION_LIMIT     180.0
 
 #define PID_VEL_X_KP 25.0f
 #define PID_VEL_X_KI 1.0f
