@@ -58,12 +58,14 @@
 
 #define GYRO_ADD_RAW_AND_VARIANCE_LOG_VALUES
 
-#define SENSORS_READ_RATE_HZ            1000
+#define SENSORS_READ_RATE_HZ            2000
 #define SENSORS_STARTUP_TIME_MS         1000
 #define SENSORS_READ_BARO_HZ            50
 #define SENSORS_READ_MAG_HZ             20
-#define SENSORS_DELAY_BARO              (SENSORS_READ_RATE_HZ/SENSORS_READ_BARO_HZ)
-#define SENSORS_DELAY_MAG               (SENSORS_READ_RATE_HZ/SENSORS_READ_MAG_HZ)
+#define GYRO_BUFFER_SIZE                2
+#define SENSORS_DELIVER_RATE_HZ         (SENSORS_READ_RATE_HZ/GYRO_BUFFER_SIZE)
+#define SENSORS_DELAY_BARO              (SENSORS_DELIVER_RATE_HZ/SENSORS_READ_BARO_HZ)
+#define SENSORS_DELAY_MAG               (SENSORS_DELIVER_RATE_HZ/SENSORS_READ_MAG_HZ)
 
 #define SENSORS_BMI088_GYRO_FS_CFG      BMI088_GYRO_RANGE_2000_DPS
 #define SENSORS_BMI088_DEG_PER_LSB_CFG  (2.0f *2000.0f) / 65536.0f
@@ -114,6 +116,13 @@ static xQueueHandle magnetometerDataQueue;
 STATIC_MEM_QUEUE_ALLOC(magnetometerDataQueue, 1, sizeof(Axis3f));
 static xQueueHandle barometerDataQueue;
 STATIC_MEM_QUEUE_ALLOC(barometerDataQueue, 1, sizeof(baro_t));
+
+/* The gyro is sampled at 2 kHz but the rest of the system runs at 1 kHz. Each
+ * pair of samples is stashed here and latched by sensorsAcquire() so both can be
+ * logged in one 1 kHz iteration. Slot 0 is the older sample of the pair. */
+static Axis3f gyroBuffer[GYRO_BUFFER_SIZE];
+static uint8_t gyroBufferIdx;
+static Axis3f gyroLatched[GYRO_BUFFER_SIZE];
 
 static xSemaphoreHandle dataReady;
 static StaticSemaphore_t dataReadyBuffer;
@@ -282,6 +291,9 @@ void sensorsBmi088Bmp3xxAcquire(sensorData_t *sensors)
   sensorsReadMag(&sensors->mag);
   sensorsReadBaro(&sensors->baro);
   sensors->interruptTimestamp = sensorData.interruptTimestamp;
+  for (uint8_t i = 0; i < GYRO_BUFFER_SIZE; i++) {
+    gyroLatched[i] = gyroBuffer[i];
+  }
 }
 
 bool sensorsBmi088Bmp3xxAreCalibrated()
@@ -297,6 +309,7 @@ static void sensorsTask(void *param)
   Axis3f accScaledIMU;
   Axis3f accScaled;
   measurement_t measurement;
+  bool gyroPairReady = false;
   /* wait an additional second the keep bus free
    * this is only required by the z-ranger, since the
    * configuration will be done after system start-up */
@@ -329,9 +342,16 @@ static void sensorsTask(void *param)
       sensorsAlignToAirframe(&gyroScaledIMU, &sensorData.gyro);
       applyAxis3fLpf((lpf2pData*)(&gyroLpf), &sensorData.gyro);
 
-      measurement.type = MeasurementTypeGyroscope;
-      measurement.data.gyroscope.gyro = sensorData.gyro;
-      estimatorEnqueue(&measurement);
+      gyroBuffer[gyroBufferIdx] = sensorData.gyro;
+      gyroBufferIdx = (gyroBufferIdx + 1) % GYRO_BUFFER_SIZE;
+      gyroPairReady = (gyroBufferIdx == 0);
+
+      if (gyroPairReady)
+      {
+        measurement.type = MeasurementTypeGyroscope;
+        measurement.data.gyroscope.gyro = sensorData.gyro;
+        estimatorEnqueue(&measurement);
+      }
 
       /* Acelerometer */
       accScaledIMU.x = accelRaw.x * SENSORS_BMI088_G_PER_LSB_CFG / accScale;
@@ -341,9 +361,17 @@ static void sensorsTask(void *param)
       sensorsAccAlignToGravity(&accScaled, &sensorData.acc);
       applyAxis3fLpf((lpf2pData*)(&accLpf), &sensorData.acc);
 
-      measurement.type = MeasurementTypeAcceleration;
-      measurement.data.acceleration.acc = sensorData.acc;
-      estimatorEnqueue(&measurement);
+      if (gyroPairReady)
+      {
+        measurement.type = MeasurementTypeAcceleration;
+        measurement.data.acceleration.acc = sensorData.acc;
+        estimatorEnqueue(&measurement);
+      }
+    }
+
+    if (!gyroPairReady)
+    {
+      continue;
     }
 
     if (isBarometerPresent)
@@ -408,9 +436,9 @@ static void sensorsDeviceInit(void)
     bmi088Dev.gyro_cfg.power = BMI088_GYRO_PM_NORMAL;
     rslt |= bmi088_set_gyro_power_mode(&bmi088Dev);
     /* set bandwidth and range of gyro */
-    bmi088Dev.gyro_cfg.bw = BMI088_GYRO_BW_116_ODR_1000_HZ;
+    bmi088Dev.gyro_cfg.bw = BMI088_GYRO_BW_230_ODR_2000_HZ;
     bmi088Dev.gyro_cfg.range = SENSORS_BMI088_GYRO_FS_CFG;
-    bmi088Dev.gyro_cfg.odr = BMI088_GYRO_BW_116_ODR_1000_HZ;
+    bmi088Dev.gyro_cfg.odr = BMI088_GYRO_BW_230_ODR_2000_HZ;
     rslt |= bmi088_set_gyro_meas_conf(&bmi088Dev);
 
     intConfig.gyro_int_channel = BMI088_INT_CHANNEL_3;
@@ -543,8 +571,8 @@ static void sensorsDeviceInit(void)
   // Init second order filer for accelerometer and gyro
   for (uint8_t i = 0; i < 3; i++)
   {
-    lpf2pInit(&gyroLpf[i], 1000, GYRO_LPF_CUTOFF_FREQ);
-    lpf2pInit(&accLpf[i],  1000, ACCEL_LPF_CUTOFF_FREQ);
+    lpf2pInit(&gyroLpf[i], SENSORS_READ_RATE_HZ, GYRO_LPF_CUTOFF_FREQ);
+    lpf2pInit(&accLpf[i],  SENSORS_READ_RATE_HZ, ACCEL_LPF_CUTOFF_FREQ);
   }
 
   cosPitch = cosf(configblockGetCalibPitch() * (float) M_PI / 180);
@@ -963,7 +991,7 @@ void sensorsBmi088Bmp3xxSetAccMode(accModes accMode)
       }
       for (uint8_t i = 0; i < 3; i++)
       {
-        lpf2pInit(&accLpf[i],  1000, 500);
+        lpf2pInit(&accLpf[i],  SENSORS_READ_RATE_HZ, 500);
       }
       break;
     case ACC_MODE_FLIGHT:
@@ -978,7 +1006,7 @@ void sensorsBmi088Bmp3xxSetAccMode(accModes accMode)
       }
       for (uint8_t i = 0; i < 3; i++)
       {
-        lpf2pInit(&accLpf[i],  1000, ACCEL_LPF_CUTOFF_FREQ);
+        lpf2pInit(&accLpf[i],  SENSORS_READ_RATE_HZ, ACCEL_LPF_CUTOFF_FREQ);
       }
       break;
   }
@@ -1004,6 +1032,19 @@ void sensorsBmi088Bmp3xxDataAvailableCallback(void)
 }
 
 #ifdef GYRO_ADD_RAW_AND_VARIANCE_LOG_VALUES
+/**
+ * Gyro sampled at 2 kHz, exposed as the two samples taken during the last 1 kHz
+ * iteration. Slot 0 is the older of the pair. Log all six to record at 2 kHz.
+ */
+LOG_GROUP_START(gyro2k)
+LOG_ADD(LOG_FLOAT, x0, &gyroLatched[0].x)
+LOG_ADD(LOG_FLOAT, y0, &gyroLatched[0].y)
+LOG_ADD(LOG_FLOAT, z0, &gyroLatched[0].z)
+LOG_ADD(LOG_FLOAT, x1, &gyroLatched[1].x)
+LOG_ADD(LOG_FLOAT, y1, &gyroLatched[1].y)
+LOG_ADD(LOG_FLOAT, z1, &gyroLatched[1].z)
+LOG_GROUP_STOP(gyro2k)
+
 LOG_GROUP_START(gyro)
 LOG_ADD(LOG_INT16, xRaw, &gyroRaw.x)
 LOG_ADD(LOG_INT16, yRaw, &gyroRaw.y)
