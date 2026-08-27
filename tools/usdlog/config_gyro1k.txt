@@ -1,0 +1,21 @@
+1     # version
+4096  # buffer size in bytes
+log   # file name
+0     # enable on startup (0/1)
+on:fixedFrequency
+1000    # frequency
+1     # mode (0: disabled, 1: synchronous stabilizer, 2: asynchronous)
+# Companion to config.txt for a firmware with SENSORS_BMI088_GYRO_BW_CFG set to
+# BMI088_GYRO_BW_116_ODR_1000_HZ (1 kHz sampling, stock anti aliasing filter).
+# Only slot 0 exists in that build, so this records the gyro at 1 kHz.
+# x/y/z are software low pass filtered, xRaw/yRaw/zRaw are the same samples
+# without the software low pass filter.
+gyro2k.x0
+gyro2k.y0
+gyro2k.z0
+gyro2k.x0Raw
+gyro2k.y0Raw
+gyro2k.z0Raw
+acc.x
+acc.y
+acc.z

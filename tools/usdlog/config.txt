@@ -5,6 +5,8 @@ log   # file name
 on:fixedFrequency
 1000    # frequency
 1     # mode (0: disabled, 1: synchronous stabilizer, 2: asynchronous)
+# For a firmware with SENSORS_BMI088_GYRO_BW_CFG set to one of the 2 kHz
+# options; see config_gyro1k.txt for the 1 kHz build.
 # The gyro is sampled at 2 kHz while the stabilizer loop runs at 1 kHz. Each
 # logged row therefore carries the two gyro samples of that loop iteration
 # (slot 0 is the older one), which unrolls to a 2 kHz gyro recording.

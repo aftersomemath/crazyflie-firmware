@@ -58,12 +58,35 @@
 
 #define GYRO_ADD_RAW_AND_VARIANCE_LOG_VALUES
 
-#define SENSORS_READ_RATE_HZ            2000
+/* Gyro hardware configuration. The sensor ties the anti aliasing filter
+ * bandwidth to the output data rate in a single register field, so one of these
+ * picks both. Copy one into SENSORS_BMI088_GYRO_BW_CFG:
+ *
+ *   BMI088_GYRO_BW_532_ODR_2000_HZ   2 kHz sampling, 532 Hz anti aliasing
+ *   BMI088_GYRO_BW_230_ODR_2000_HZ   2 kHz sampling, 230 Hz anti aliasing
+ *   BMI088_GYRO_BW_116_ODR_1000_HZ   1 kHz sampling, 116 Hz anti aliasing (stock)
+ *
+ * Everything below is derived from this. The ODR drives the data ready
+ * interrupt and hence the rate the sensor task runs at. The rest of the system
+ * always runs at 1 kHz, so at 2 kHz the samples are buffered in pairs and
+ * delivered together, and at 1 kHz this reduces to the stock behaviour of one
+ * sample per iteration. */
+#define SENSORS_BMI088_GYRO_BW_CFG      BMI088_GYRO_BW_532_ODR_2000_HZ
+
+#if SENSORS_BMI088_GYRO_BW_CFG == BMI088_GYRO_BW_532_ODR_2000_HZ || \
+    SENSORS_BMI088_GYRO_BW_CFG == BMI088_GYRO_BW_230_ODR_2000_HZ
+  #define SENSORS_READ_RATE_HZ          2000
+#elif SENSORS_BMI088_GYRO_BW_CFG == BMI088_GYRO_BW_116_ODR_1000_HZ
+  #define SENSORS_READ_RATE_HZ          1000
+#else
+  #error "Unsupported SENSORS_BMI088_GYRO_BW_CFG, see the list above"
+#endif
+
 #define SENSORS_STARTUP_TIME_MS         1000
 #define SENSORS_READ_BARO_HZ            50
 #define SENSORS_READ_MAG_HZ             20
-#define GYRO_BUFFER_SIZE                2
-#define SENSORS_DELIVER_RATE_HZ         (SENSORS_READ_RATE_HZ/GYRO_BUFFER_SIZE)
+#define SENSORS_DELIVER_RATE_HZ         RATE_MAIN_LOOP
+#define GYRO_BUFFER_SIZE                (SENSORS_READ_RATE_HZ/SENSORS_DELIVER_RATE_HZ)
 #define SENSORS_DELAY_BARO              (SENSORS_DELIVER_RATE_HZ/SENSORS_READ_BARO_HZ)
 #define SENSORS_DELAY_MAG               (SENSORS_DELIVER_RATE_HZ/SENSORS_READ_MAG_HZ)
 
@@ -117,9 +140,10 @@ STATIC_MEM_QUEUE_ALLOC(magnetometerDataQueue, 1, sizeof(Axis3f));
 static xQueueHandle barometerDataQueue;
 STATIC_MEM_QUEUE_ALLOC(barometerDataQueue, 1, sizeof(baro_t));
 
-/* The gyro is sampled at 2 kHz but the rest of the system runs at 1 kHz. Each
- * pair of samples is stashed here and latched by sensorsAcquire() so both can be
- * logged in one 1 kHz iteration. Slot 0 is the older sample of the pair.
+/* The gyro may be sampled faster than the 1 kHz the rest of the system runs at.
+ * The samples of one 1 kHz iteration are stashed here and latched by
+ * sensorsAcquire() so all of them can be logged in that iteration. Slot 0 is the
+ * oldest sample. At SENSORS_READ_RATE_HZ 1000 there is only slot 0.
  * Two versions are kept: the software low pass filtered signal that is fed to
  * the estimator and the unfiltered signal straight off the sensor. */
 static Axis3f gyroBuffer[GYRO_BUFFER_SIZE];
@@ -442,9 +466,9 @@ static void sensorsDeviceInit(void)
     bmi088Dev.gyro_cfg.power = BMI088_GYRO_PM_NORMAL;
     rslt |= bmi088_set_gyro_power_mode(&bmi088Dev);
     /* set bandwidth and range of gyro */
-    bmi088Dev.gyro_cfg.bw = BMI088_GYRO_BW_230_ODR_2000_HZ;
+    bmi088Dev.gyro_cfg.bw = SENSORS_BMI088_GYRO_BW_CFG;
     bmi088Dev.gyro_cfg.range = SENSORS_BMI088_GYRO_FS_CFG;
-    bmi088Dev.gyro_cfg.odr = BMI088_GYRO_BW_230_ODR_2000_HZ;
+    bmi088Dev.gyro_cfg.odr = SENSORS_BMI088_GYRO_BW_CFG;
     rslt |= bmi088_set_gyro_meas_conf(&bmi088Dev);
 
     intConfig.gyro_int_channel = BMI088_INT_CHANNEL_3;
@@ -1039,9 +1063,9 @@ void sensorsBmi088Bmp3xxDataAvailableCallback(void)
 
 #ifdef GYRO_ADD_RAW_AND_VARIANCE_LOG_VALUES
 /**
- * Gyro sampled at 2 kHz, exposed as the two samples taken during the last 1 kHz
- * iteration. Slot 0 is the older of the pair, so logging all of these at 1 kHz
- * records the gyro at 2 kHz.
+ * The gyro samples taken during the last 1 kHz iteration, slot 0 being the
+ * oldest. Logging all of these at 1 kHz records the gyro at SENSORS_READ_RATE_HZ.
+ * The slot 1 variables only exist in a 2 kHz build.
  *
  * x/y/z are the software low pass filtered values handed to the estimator,
  * xRaw/yRaw/zRaw are the same samples without the software low pass filter
@@ -1051,15 +1075,17 @@ LOG_GROUP_START(gyro2k)
 LOG_ADD(LOG_FLOAT, x0, &gyroLatched[0].x)
 LOG_ADD(LOG_FLOAT, y0, &gyroLatched[0].y)
 LOG_ADD(LOG_FLOAT, z0, &gyroLatched[0].z)
-LOG_ADD(LOG_FLOAT, x1, &gyroLatched[1].x)
-LOG_ADD(LOG_FLOAT, y1, &gyroLatched[1].y)
-LOG_ADD(LOG_FLOAT, z1, &gyroLatched[1].z)
 LOG_ADD(LOG_FLOAT, x0Raw, &gyroUnfilteredLatched[0].x)
 LOG_ADD(LOG_FLOAT, y0Raw, &gyroUnfilteredLatched[0].y)
 LOG_ADD(LOG_FLOAT, z0Raw, &gyroUnfilteredLatched[0].z)
+#if GYRO_BUFFER_SIZE > 1
+LOG_ADD(LOG_FLOAT, x1, &gyroLatched[1].x)
+LOG_ADD(LOG_FLOAT, y1, &gyroLatched[1].y)
+LOG_ADD(LOG_FLOAT, z1, &gyroLatched[1].z)
 LOG_ADD(LOG_FLOAT, x1Raw, &gyroUnfilteredLatched[1].x)
 LOG_ADD(LOG_FLOAT, y1Raw, &gyroUnfilteredLatched[1].y)
 LOG_ADD(LOG_FLOAT, z1Raw, &gyroUnfilteredLatched[1].z)
+#endif
 LOG_GROUP_STOP(gyro2k)
 
 LOG_GROUP_START(gyro)
