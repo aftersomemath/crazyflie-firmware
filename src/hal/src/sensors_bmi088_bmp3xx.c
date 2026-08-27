@@ -73,11 +73,15 @@
  * sample per iteration. */
 #define SENSORS_BMI088_GYRO_BW_CFG      BMI088_GYRO_BW_532_ODR_2000_HZ
 
-#if SENSORS_BMI088_GYRO_BW_CFG == BMI088_GYRO_BW_532_ODR_2000_HZ || \
-    SENSORS_BMI088_GYRO_BW_CFG == BMI088_GYRO_BW_230_ODR_2000_HZ
+#if SENSORS_BMI088_GYRO_BW_CFG == BMI088_GYRO_BW_532_ODR_2000_HZ
   #define SENSORS_READ_RATE_HZ          2000
+  #define SENSORS_GYRO_AA_BW_HZ         532
+#elif SENSORS_BMI088_GYRO_BW_CFG == BMI088_GYRO_BW_230_ODR_2000_HZ
+  #define SENSORS_READ_RATE_HZ          2000
+  #define SENSORS_GYRO_AA_BW_HZ         230
 #elif SENSORS_BMI088_GYRO_BW_CFG == BMI088_GYRO_BW_116_ODR_1000_HZ
   #define SENSORS_READ_RATE_HZ          1000
+  #define SENSORS_GYRO_AA_BW_HZ         116
 #else
   #error "Unsupported SENSORS_BMI088_GYRO_BW_CFG, see the list above"
 #endif
@@ -107,8 +111,16 @@
 // Number of samples used in variance calculation. Changing this effects the threshold
 #define SENSORS_NBR_OF_BIAS_SAMPLES  512
 
-// Variance threshold to take zero bias for gyro
-#define GYRO_VARIANCE_BASE              100
+/* Variance threshold to take zero bias for gyro. The gyro's noise power is
+ * proportional to the bandwidth of the anti aliasing filter, so widening that
+ * filter raises the variance measured on a stationary platform. The threshold
+ * below is tuned for the stock 116 Hz configuration and is scaled by the
+ * bandwidth ratio to keep the same margin in every configuration. This only
+ * compensates the sensor's own noise, not the mechanical noise of the airframe. */
+#define GYRO_VARIANCE_NOMINAL           100.0f
+#define GYRO_VARIANCE_NOMINAL_BW_HZ     116.0f
+#define GYRO_VARIANCE_BASE              (GYRO_VARIANCE_NOMINAL * \
+                                         (SENSORS_GYRO_AA_BW_HZ / GYRO_VARIANCE_NOMINAL_BW_HZ))
 #define GYRO_VARIANCE_THRESHOLD_X       (GYRO_VARIANCE_BASE)
 #define GYRO_VARIANCE_THRESHOLD_Y       (GYRO_VARIANCE_BASE)
 #define GYRO_VARIANCE_THRESHOLD_Z       (GYRO_VARIANCE_BASE)
