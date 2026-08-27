@@ -111,16 +111,37 @@
 // Number of samples used in variance calculation. Changing this effects the threshold
 #define SENSORS_NBR_OF_BIAS_SAMPLES  512
 
-/* Variance threshold to take zero bias for gyro. The gyro's noise power is
- * proportional to the bandwidth of the anti aliasing filter, so widening that
- * filter raises the variance measured on a stationary platform. The threshold
- * below is tuned for the stock 116 Hz configuration and is scaled by the
- * bandwidth ratio to keep the same margin in every configuration. This only
- * compensates the sensor's own noise, not the mechanical noise of the airframe. */
-#define GYRO_VARIANCE_NOMINAL           100.0f
-#define GYRO_VARIANCE_NOMINAL_BW_HZ     116.0f
-#define GYRO_VARIANCE_BASE              (GYRO_VARIANCE_NOMINAL * \
-                                         (SENSORS_GYRO_AA_BW_HZ / GYRO_VARIANCE_NOMINAL_BW_HZ))
+/* Variance threshold to take zero bias for gyro, in gyro LSB^2. The gate exists
+ * to detect that the platform is standing still before the bias is latched.
+ *
+ * The sensor's own noise power is proportional to the anti aliasing bandwidth,
+ * but that is not what dominates here. Measured on the airframe, standing
+ * still, the variance grows far faster than the bandwidth does:
+ *
+ *   bandwidth   measured variance (x/y/z)   ratio to 116 Hz   threshold
+ *   116 Hz        8 /   17 /   12             1x                100
+ *   230 Hz       55 /   80 /  110             7x                600
+ *   532 Hz     2700 / 3200 / 6000           320x              18000
+ *
+ * A 2.3x bandwidth step from 230 to 532 Hz costs 48x in variance, so mechanical
+ * noise in that band, plus content folding in from above the 1 kHz Nyquist,
+ * dominates the sensor noise. The thresholds are therefore set from measurement
+ * with roughly 3x margin rather than derived from the bandwidth.
+ *
+ * Note that at 532 Hz the stationary noise is already ~4.7 deg/s RMS, so the
+ * threshold has to sit above that and the gate no longer rejects small motion.
+ * Make sure the platform is still at startup rather than relying on the check.
+ * The bias estimate itself is unaffected: the noise is zero mean and averaging
+ * over SENSORS_NBR_OF_BIAS_SAMPLES leaves ~0.2 deg/s of error even at 532 Hz. */
+#if SENSORS_GYRO_AA_BW_HZ == 116
+  #define GYRO_VARIANCE_BASE            100.0f
+#elif SENSORS_GYRO_AA_BW_HZ == 230
+  #define GYRO_VARIANCE_BASE            600.0f
+#elif SENSORS_GYRO_AA_BW_HZ == 532
+  #define GYRO_VARIANCE_BASE            18000.0f
+#else
+  #error "No measured gyro variance threshold for SENSORS_GYRO_AA_BW_HZ"
+#endif
 #define GYRO_VARIANCE_THRESHOLD_X       (GYRO_VARIANCE_BASE)
 #define GYRO_VARIANCE_THRESHOLD_Y       (GYRO_VARIANCE_BASE)
 #define GYRO_VARIANCE_THRESHOLD_Z       (GYRO_VARIANCE_BASE)
