@@ -119,10 +119,14 @@ STATIC_MEM_QUEUE_ALLOC(barometerDataQueue, 1, sizeof(baro_t));
 
 /* The gyro is sampled at 2 kHz but the rest of the system runs at 1 kHz. Each
  * pair of samples is stashed here and latched by sensorsAcquire() so both can be
- * logged in one 1 kHz iteration. Slot 0 is the older sample of the pair. */
+ * logged in one 1 kHz iteration. Slot 0 is the older sample of the pair.
+ * Two versions are kept: the software low pass filtered signal that is fed to
+ * the estimator and the unfiltered signal straight off the sensor. */
 static Axis3f gyroBuffer[GYRO_BUFFER_SIZE];
+static Axis3f gyroUnfilteredBuffer[GYRO_BUFFER_SIZE];
 static uint8_t gyroBufferIdx;
 static Axis3f gyroLatched[GYRO_BUFFER_SIZE];
+static Axis3f gyroUnfilteredLatched[GYRO_BUFFER_SIZE];
 
 static xSemaphoreHandle dataReady;
 static StaticSemaphore_t dataReadyBuffer;
@@ -293,6 +297,7 @@ void sensorsBmi088Bmp3xxAcquire(sensorData_t *sensors)
   sensors->interruptTimestamp = sensorData.interruptTimestamp;
   for (uint8_t i = 0; i < GYRO_BUFFER_SIZE; i++) {
     gyroLatched[i] = gyroBuffer[i];
+    gyroUnfilteredLatched[i] = gyroUnfilteredBuffer[i];
   }
 }
 
@@ -340,6 +345,7 @@ static void sensorsTask(void *param)
       gyroScaledIMU.y =  (gyroRaw.y - gyroBias.y) * SENSORS_BMI088_DEG_PER_LSB_CFG;
       gyroScaledIMU.z =  (gyroRaw.z - gyroBias.z) * SENSORS_BMI088_DEG_PER_LSB_CFG;
       sensorsAlignToAirframe(&gyroScaledIMU, &sensorData.gyro);
+      gyroUnfilteredBuffer[gyroBufferIdx] = sensorData.gyro;
       applyAxis3fLpf((lpf2pData*)(&gyroLpf), &sensorData.gyro);
 
       gyroBuffer[gyroBufferIdx] = sensorData.gyro;
@@ -1034,7 +1040,12 @@ void sensorsBmi088Bmp3xxDataAvailableCallback(void)
 #ifdef GYRO_ADD_RAW_AND_VARIANCE_LOG_VALUES
 /**
  * Gyro sampled at 2 kHz, exposed as the two samples taken during the last 1 kHz
- * iteration. Slot 0 is the older of the pair. Log all six to record at 2 kHz.
+ * iteration. Slot 0 is the older of the pair, so logging all of these at 1 kHz
+ * records the gyro at 2 kHz.
+ *
+ * x/y/z are the software low pass filtered values handed to the estimator,
+ * xRaw/yRaw/zRaw are the same samples without the software low pass filter
+ * (still bias corrected, scaled to deg/s and aligned to the airframe).
  */
 LOG_GROUP_START(gyro2k)
 LOG_ADD(LOG_FLOAT, x0, &gyroLatched[0].x)
@@ -1043,6 +1054,12 @@ LOG_ADD(LOG_FLOAT, z0, &gyroLatched[0].z)
 LOG_ADD(LOG_FLOAT, x1, &gyroLatched[1].x)
 LOG_ADD(LOG_FLOAT, y1, &gyroLatched[1].y)
 LOG_ADD(LOG_FLOAT, z1, &gyroLatched[1].z)
+LOG_ADD(LOG_FLOAT, x0Raw, &gyroUnfilteredLatched[0].x)
+LOG_ADD(LOG_FLOAT, y0Raw, &gyroUnfilteredLatched[0].y)
+LOG_ADD(LOG_FLOAT, z0Raw, &gyroUnfilteredLatched[0].z)
+LOG_ADD(LOG_FLOAT, x1Raw, &gyroUnfilteredLatched[1].x)
+LOG_ADD(LOG_FLOAT, y1Raw, &gyroUnfilteredLatched[1].y)
+LOG_ADD(LOG_FLOAT, z1Raw, &gyroUnfilteredLatched[1].z)
 LOG_GROUP_STOP(gyro2k)
 
 LOG_GROUP_START(gyro)

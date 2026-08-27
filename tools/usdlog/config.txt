@@ -1,25 +1,27 @@
 1     # version
-512   # buffer size in bytes
+4096  # buffer size in bytes
 log   # file name
 0     # enable on startup (0/1)
 on:fixedFrequency
-250     # frequency
+1000    # frequency
 1     # mode (0: disabled, 1: synchronous stabilizer, 2: asynchronous)
+# The gyro is sampled at 2 kHz while the stabilizer loop runs at 1 kHz. Each
+# logged row therefore carries the two gyro samples of that loop iteration
+# (slot 0 is the older one), which unrolls to a 2 kHz gyro recording.
+# x/y/z are software low pass filtered, xRaw/yRaw/zRaw are the same samples
+# without the software low pass filter.
+gyro2k.x0
+gyro2k.y0
+gyro2k.z0
+gyro2k.x1
+gyro2k.y1
+gyro2k.z1
+gyro2k.x0Raw
+gyro2k.y0Raw
+gyro2k.z0Raw
+gyro2k.x1Raw
+gyro2k.y1Raw
+gyro2k.z1Raw
 acc.x
 acc.y
 acc.z
-gyro.x
-gyro.y
-gyro.z
-baro.asl
-baro.temp
-baro.pressure
-stabilizer.roll
-stabilizer.pitch
-stabilizer.yaw
-stabilizer.thrust
-ctrltarget.roll
-ctrltarget.pitch
-ctrltarget.yaw
-range.zrange
-on:activeMarkerModeChanged
